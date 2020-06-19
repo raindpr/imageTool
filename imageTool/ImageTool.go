@@ -1,9 +1,7 @@
-
 package main
 
 import (
 	"bytes"
-	"code.google.com/p/graphics-go/graphics"
 	"fmt"
 	"image"
 	"image/color"
@@ -12,10 +10,12 @@ import (
 	"image/png"
 	"io/ioutil"
 	"os"
+	"path"
 	"strconv"
 	"strings"
-)
 
+	"code.google.com/p/graphics-go/graphics"
+)
 
 //帮助提示信息
 var usage = func() {
@@ -26,24 +26,26 @@ var usage = func() {
 	fmt.Println("    -g         图片灰度")
 	fmt.Println("    -c         缩放文本，该参数时，可以传入图片缩放的宽度 如：imagetool -c 1.jpg c1.jpg 100")
 	fmt.Println("    -t         转成文本")
-	fmt.Println("    -cut       剪切图片，该参数时，可以传入剪切的图片和生成文件夹 如：imagetool -cut 1.jpg cut ")
+	fmt.Println("    -cut       剪切单个图片，该参数时，可以传入剪切的图片 如：imagetool -cut 1.jpg")
+	fmt.Println("    -cut-dir   剪切文件夹所以图片，该参数时，可以传入剪切的图片和生成文件夹 如：imagetool -cut-dir filename")
 }
 
 func main() {
 	args := os.Args //获取用户输入的所有参数
-	//if args == nil || len(args) < 4 || !(args[1] == "-r" || args[1] == "-g" || args[1] == "-t" || args[1] == "-c" || args[1] == "-cut") {
-	//	usage()
-	//	return
-	//}
+	if args == nil || len(args) < 3 || !(args[1] == "-r" || args[1] == "-g" || args[1] == "-t" || args[1] == "-c" || args[1] == "-cut" || args[1] == "-cut-dir") {
+		usage()
+		return
+	}
 
-	//option := args[1]
-	//source := args[2]
-	//target := args[3]
+	option := args[1]
+	source := args[2]
+	target := ""
+	if len(args) > 3 {
+		target = args[3]
+	}
 
-	option := "-cut"
-	source := "Plane.png"
-	target := "Planefile"
-
+	//option := "-cut-dir"
+	//source := "test"
 	//读取文件
 	ff, _ := ioutil.ReadFile(source)
 	bbb := bytes.NewBuffer(ff)
@@ -69,8 +71,10 @@ func main() {
 		defer f.Close()
 		encode(source, f, newRgba)
 	} else if option == "-cut" {
-		clipping(m,source,target)
-	}else {
+		clipping(m, source)
+	} else if option == "-cut-dir" {
+		GetAllFile(source)
+	} else {
 		ascllimage(m, target)
 	}
 	fmt.Println("转换完成...")
@@ -88,7 +92,6 @@ func encode(inputName string, file *os.File, rgba *image.RGBA) {
 		fmt.Errorf("不支持的图片格式")
 	}
 }
-
 
 //图片色彩反转
 func fzImage(m image.Image) *image.RGBA {
@@ -140,6 +143,7 @@ func rectImage(m image.Image, newdx int) *image.RGBA {
 	graphics.Scale(newRgba, m)
 	return newRgba
 }
+
 //图片转为字符画（简易版）
 func ascllimage(m image.Image, target string) {
 	if m.Bounds().Dx() > 300 {
@@ -174,7 +178,6 @@ func ascllimage(m image.Image, target string) {
 var mapPic = make(map[int]*PicCell)
 var picFlog = make(map[int]int)
 
-
 type PicCell struct {
 	point []PicPoint
 	name  int
@@ -195,7 +198,7 @@ func NewPicCell(n int) *PicCell {
 	}
 }
 
-func (c *PicCell)add(p PicPoint)  {
+func (c *PicCell) add(p PicPoint) {
 	c.point = append(c.point, p)
 }
 
@@ -204,12 +207,14 @@ type PicPoint struct {
 	poy int
 }
 
-func isHavePix(r uint32,g uint32,b uint32, a uint32)bool{
+func isHavePix(r uint32, g uint32, b uint32, a uint32) bool {
 	return !(r == 0 && g == 0 && b == 0 && a == 0)
 }
 
-func clipping(m image.Image,source string, target string) {
-
+func clipping(m image.Image, source string) {
+	fmt.Println("扫描图片" + source)
+	mapPic = make(map[int]*PicCell)
+	picFlog = make(map[int]int)
 	bounds := m.Bounds()
 	dx := bounds.Dx()
 	dy := bounds.Dy()
@@ -217,9 +222,9 @@ func clipping(m image.Image,source string, target string) {
 		for y := 0; y < dy; y++ {
 			colorRgb := m.At(x, y)
 			r, g, b, a := colorRgb.RGBA()
-			if isHavePix(r,g,b,a) {
-				key := x * 10000 + y
-				_, ok := picFlog [key]
+			if isHavePix(r, g, b, a) {
+				key := x*10000 + y
+				_, ok := picFlog[key]
 				if !ok {
 					mapPic[key] = NewPicCell(key)
 					FindPoint(x, y, m, key)
@@ -227,8 +232,15 @@ func clipping(m image.Image,source string, target string) {
 			}
 		}
 	}
-	for _,cell := range mapPic {
-		newRgba := image.NewRGBA(image.Rect(0, 0, cell.maxX - cell.minX, cell.maxY - cell.minY))
+	baseFile := path.Base(source)
+	dirFile := path.Dir(source)
+	filesplit := strings.Split(baseFile, ".")
+	outDir := path.Join(dirFile, filesplit[0])
+	if !isExist(outDir) {
+		os.Mkdir(outDir, os.ModePerm)
+	}
+	for _, cell := range mapPic {
+		newRgba := image.NewRGBA(image.Rect(0, 0, cell.maxX-cell.minX, cell.maxY-cell.minY))
 		for i := cell.minX; i <= cell.maxX; i++ {
 			for j := cell.minY; j <= cell.maxY; j++ {
 				colorRgb := m.At(i, j)
@@ -240,14 +252,14 @@ func clipping(m image.Image,source string, target string) {
 				newRgba.SetRGBA(i-cell.minX, j-cell.minY, color.RGBA{r_uint8, g_uint8, b_uint8, a_uint8})
 			}
 		}
-		f, _ := os.Create(fmt.Sprintf("%s/%d.png", target, cell.name))
+		f, _ := os.Create(fmt.Sprintf("%s/%d.png", outDir, cell.name))
 		encode(source, f, newRgba)
 		f.Close()
 		newRgba = nil
 	}
 
 }
-func FindPoint(x int,y int,m image.Image,key int)  {
+func FindPoint(x int, y int, m image.Image, key int) {
 	if x < 0 || x > 4096 {
 		return
 	}
@@ -256,7 +268,7 @@ func FindPoint(x int,y int,m image.Image,key int)  {
 	}
 	colorRgb := m.At(x, y)
 	r, g, b, a := colorRgb.RGBA()
-	if isHavePix(r,g,b,a) {
+	if isHavePix(r, g, b, a) {
 		cell, picFind := mapPic[key]
 		if !picFind {
 			fmt.Println("NewPicCell")
@@ -264,7 +276,7 @@ func FindPoint(x int,y int,m image.Image,key int)  {
 			cell = mapPic[key]
 		}
 		//cell.add(PicPoint{pox:x,poy:y})
-		k := x * 10000  + y
+		k := x*10000 + y
 		if x < cell.minX {
 			cell.minX = x
 		}
@@ -280,22 +292,55 @@ func FindPoint(x int,y int,m image.Image,key int)  {
 		value, ok := picFlog[k]
 		if !ok {
 			picFlog[k] = key
-			FindPoint(x-1,y+1,m,key)
-			FindPoint(x,y+1,m,key)
-			FindPoint(x+1,y+1,m,key)
+			FindPoint(x-1, y+1, m, key)
+			FindPoint(x, y+1, m, key)
+			FindPoint(x+1, y+1, m, key)
 
-			FindPoint(x-1,y,m,key)
-			FindPoint(x+1,y,m,key)
+			FindPoint(x-1, y, m, key)
+			FindPoint(x+1, y, m, key)
 
-			FindPoint(x-1,y-1,m,key)
-			FindPoint(x,y-1,m,key)
-			FindPoint(x+1,y-1,m,key)
-		}else {
-			if value == key{
+			FindPoint(x-1, y-1, m, key)
+			FindPoint(x, y-1, m, key)
+			FindPoint(x+1, y-1, m, key)
+		} else {
+			if value == key {
 
-			}else {
-				fmt.Println("find key not is sum key x")
+			} else {
+
 			}
 		}
 	}
+}
+func GetAllFile(pathname string) error {
+	rd, err := ioutil.ReadDir(pathname)
+	for _, fi := range rd {
+		if fi.IsDir() {
+			fmt.Printf("[%s]\n", pathname+"/"+fi.Name())
+			GetAllFile(pathname + fi.Name() + "/")
+		} else {
+			ff, _ := ioutil.ReadFile(fi.Name())
+			bbb := bytes.NewBuffer(ff)
+			m, _, _ := image.Decode(bbb)
+			if m != nil {
+				clipping(m, path.Join(pathname, fi.Name()))
+			}
+		}
+	}
+	return err
+}
+
+//判断文件或文件夹是否存在
+func isExist(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsExist(err) {
+			return true
+		}
+		if os.IsNotExist(err) {
+			return false
+		}
+		fmt.Println(err)
+		return false
+	}
+	return true
 }
